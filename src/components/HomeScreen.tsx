@@ -1,6 +1,7 @@
 import React from 'react';
-import { Bot, Users, HelpCircle, Settings, Crown, Swords, Globe } from 'lucide-react';
-import { GameMode, GameSettings, GameVariant } from '../types';
+import { Bot, Users, HelpCircle, Settings, Crown, Globe } from 'lucide-react';
+import { GameMode, GameSettings } from '../types';
+import { EmptyBoardPreview } from './EmptyBoardPreview';
 
 interface HomeScreenProps {
   onStartGame: (mode: GameMode) => void;
@@ -20,7 +21,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onUpdateSettings,
 }) => {
   return (
-    <div className="relative min-h-[100dvh] w-full flex flex-col items-center justify-between p-6 bg-[#0E0F12] text-zinc-100 overflow-hidden select-none">
+    <div className="relative min-h-[100dvh] w-full flex flex-col items-center justify-start p-4 sm:p-6 bg-[#0E0F12] text-zinc-100 overflow-y-auto select-none">
       {/* Ambient Luxury Dark Vignette Background */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-950/20 via-zinc-950 to-black pointer-events-none" />
       
@@ -28,26 +29,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[linear-gradient(to_right,#808080_1px,transparent_1px),linear-gradient(to_bottom,#808080_1px,transparent_1px)] bg-[size:4rem_4rem]" />
 
       {/* Header / Brand Emblem */}
-      <div className="relative z-10 w-full max-w-sm flex flex-col items-center pt-6 sm:pt-10 text-center">
+      <div className="relative z-10 w-full max-w-sm flex flex-col items-center pt-2 sm:pt-4 text-center">
         
-        {/* Decorative Checkers Disc Art */}
-        <div className="relative mb-5 flex items-center justify-center">
-          {/* Outer Ring */}
-          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full wood-board-walnut p-2 shadow-[0_15px_35px_rgba(0,0,0,0.8)] border border-amber-400/30 flex items-center justify-center">
-            {/* Dark Checker Disc */}
-            <div className="w-full h-full rounded-full piece-black flex items-center justify-center relative">
-              <div className="w-[75%] h-[75%] rounded-full piece-groove flex items-center justify-center">
-                <Crown className="w-7 h-7 text-amber-300 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]" />
-              </div>
-            </div>
-          </div>
-          
-          {/* Overlapping Red Checker Disc */}
-          <div className="absolute -bottom-1 -right-2 w-12 h-12 rounded-full piece-red shadow-2xl flex items-center justify-center border border-red-400/40">
-            <div className="w-[70%] h-[70%] rounded-full piece-groove flex items-center justify-center">
-              <div className="w-2 h-2 rounded-full bg-amber-400/80" />
-            </div>
-          </div>
+        {/* Subtle Crown Badge */}
+        <div className="flex items-center justify-center w-10 h-10 rounded-full bg-zinc-900/90 border border-amber-400/30 shadow-lg mb-2">
+          <Crown className="w-5 h-5 text-amber-400 fill-amber-400/20" />
         </div>
 
         {/* Large DAMA Title */}
@@ -55,17 +41,20 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           DAMA
         </h1>
         
-        <div className="flex items-center gap-3 my-2">
+        <div className="flex items-center gap-3 my-1.5">
           <div className="h-[1px] w-8 bg-gradient-to-r from-transparent to-amber-400/60" />
-          <p className="text-[11px] font-semibold tracking-[0.25em] uppercase text-amber-200/70">
+          <p className="text-[11px] font-semibold tracking-[0.25em] uppercase text-amber-200/80">
             {settings.variant === 'turkish' ? 'TÜRK DAMASI (DÜZ & YANLAR)' : 'KLASİK ÇAPRAZ DAMA'}
           </p>
           <div className="h-[1px] w-8 bg-gradient-to-l from-transparent to-amber-400/60" />
         </div>
+
+        {/* Empty Checkers Board Preview (Taşsız Dama Tahtası Görüntüsü) */}
+        <EmptyBoardPreview theme={settings.theme} variant={settings.variant} />
       </div>
 
       {/* Main Action Area */}
-      <div className="relative z-10 w-full max-w-xs flex flex-col gap-3 py-2">
+      <div className="relative z-10 w-full max-w-xs flex flex-col gap-2.5 py-1">
         
         {/* Game Variant Selector Pill */}
         <div className="p-1 rounded-2xl bg-zinc-950/90 border border-white/10 shadow-inner">
@@ -100,7 +89,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         <button
           id="btn-home-play-ai"
           onClick={() => onStartGame('ai')}
-          className="group relative h-14 w-full rounded-2xl bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-zinc-950 font-bold text-sm tracking-[0.15em] uppercase flex items-center justify-between px-5 shadow-[0_10px_25px_rgba(245,158,11,0.25)] border border-amber-300/40 active:scale-[0.98] transition-all duration-200"
+          className="group relative h-13 sm:h-14 w-full rounded-2xl bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-zinc-950 font-bold text-xs sm:text-sm tracking-[0.15em] uppercase flex items-center justify-between px-5 shadow-[0_10px_25px_rgba(245,158,11,0.25)] border border-amber-300/40 active:scale-[0.98] transition-all duration-200"
         >
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-zinc-950/20 flex items-center justify-center text-zinc-950">
@@ -117,7 +106,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         <button
           id="btn-home-play-online"
           onClick={onOpenOnlineLobby}
-          className="group h-13 w-full rounded-2xl bg-gradient-to-r from-emerald-950/70 via-zinc-900 to-zinc-900 hover:border-emerald-400/50 text-zinc-100 hover:text-white font-bold text-xs tracking-[0.15em] uppercase flex items-center justify-between px-5 border border-emerald-500/40 shadow-lg active:scale-[0.98] transition-all duration-200"
+          className="group h-12 sm:h-13 w-full rounded-2xl bg-gradient-to-r from-emerald-950/70 via-zinc-900 to-zinc-900 hover:border-emerald-400/50 text-zinc-100 hover:text-white font-bold text-xs tracking-[0.15em] uppercase flex items-center justify-between px-5 border border-emerald-500/40 shadow-lg active:scale-[0.98] transition-all duration-200"
         >
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400">
@@ -135,7 +124,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         <button
           id="btn-home-play-pvp"
           onClick={() => onStartGame('pvp')}
-          className="group h-13 w-full rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-100 hover:text-white font-bold text-xs tracking-[0.15em] uppercase flex items-center justify-between px-5 border border-white/10 hover:border-amber-400/40 shadow-lg active:scale-[0.98] transition-all duration-200"
+          className="group h-12 sm:h-13 w-full rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 text-zinc-100 hover:text-white font-bold text-xs tracking-[0.15em] uppercase flex items-center justify-between px-5 border border-white/10 hover:border-amber-400/40 shadow-lg active:scale-[0.98] transition-all duration-200"
         >
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-amber-400">
@@ -149,12 +138,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </button>
 
         {/* Secondary Buttons Row */}
-        <div className="grid grid-cols-2 gap-3 mt-0.5">
+        <div className="grid grid-cols-2 gap-2.5 mt-0.5">
           {/* How to Play */}
           <button
             id="btn-home-how-to-play"
             onClick={onOpenRules}
-            className="h-12 rounded-2xl bg-zinc-950/80 hover:bg-zinc-900 text-zinc-300 hover:text-white text-[11px] font-semibold tracking-wider uppercase flex items-center justify-center gap-2 border border-white/5 hover:border-white/15 transition-all duration-200 active:scale-[0.98]"
+            className="h-11 sm:h-12 rounded-2xl bg-zinc-950/80 hover:bg-zinc-900 text-zinc-300 hover:text-white text-[11px] font-semibold tracking-wider uppercase flex items-center justify-center gap-2 border border-white/5 hover:border-white/15 transition-all duration-200 active:scale-[0.98]"
           >
             <HelpCircle className="w-4 h-4 text-zinc-400" />
             <span>KURALLAR</span>
@@ -164,7 +153,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <button
             id="btn-home-settings"
             onClick={onOpenSettings}
-            className="h-12 rounded-2xl bg-zinc-950/80 hover:bg-zinc-900 text-zinc-300 hover:text-white text-[11px] font-semibold tracking-wider uppercase flex items-center justify-center gap-2 border border-white/5 hover:border-white/15 transition-all duration-200 active:scale-[0.98]"
+            className="h-11 sm:h-12 rounded-2xl bg-zinc-950/80 hover:bg-zinc-900 text-zinc-300 hover:text-white text-[11px] font-semibold tracking-wider uppercase flex items-center justify-center gap-2 border border-white/5 hover:border-white/15 transition-all duration-200 active:scale-[0.98]"
           >
             <Settings className="w-4 h-4 text-zinc-400" />
             <span>AYARLAR</span>
@@ -174,7 +163,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       </div>
 
       {/* Footer Rules Badge */}
-      <div className="relative z-10 w-full max-w-sm flex items-center justify-center gap-3 text-[10px] font-medium tracking-widest uppercase text-zinc-500 pb-2">
+      <div className="relative z-10 w-full max-w-sm flex items-center justify-center gap-3 text-[10px] font-medium tracking-widest uppercase text-zinc-500 py-3">
         <span>8x8 Tahta</span>
         <span>•</span>
         <span>{settings.variant === 'turkish' ? 'Düz & Yan Hareket' : 'Çapraz Hareket'}</span>
@@ -185,3 +174,4 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     </div>
   );
 };
+

@@ -49,10 +49,16 @@ export const OnlineGameBar: React.FC<OnlineGameBarProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [showConfirmResign, setShowConfirmResign] = useState(false);
 
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
+
   const isPlayer = myColor === 'red' || myColor === 'black';
   const opponentColor: PieceColor | null = isPlayer ? (myColor === 'red' ? 'black' : 'red') : null;
   const opponent = opponentColor ? roomState.players[opponentColor] : null;
   const isWaitingOpponent = !roomState.players.red || !roomState.players.black;
+
+  const getInviteUrl = () => {
+    return `${window.location.origin}${window.location.pathname}?room=${roomState.roomId}`;
+  };
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomState.roomId);
@@ -60,19 +66,26 @@ export const OnlineGameBar: React.FC<OnlineGameBarProps> = ({
     setTimeout(() => setIsCopied(false), 2500);
   };
 
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(getInviteUrl());
+    setIsLinkCopied(true);
+    setTimeout(() => setIsLinkCopied(false), 2500);
+  };
+
   const handleShare = async () => {
+    const inviteUrl = getInviteUrl();
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'DAMA - Online Checkers',
+          title: 'DAMA - Online Dama Maçı',
           text: `Dama oyunuma katıl! Oda Kodu: ${roomState.roomId}`,
-          url: window.location.href,
+          url: inviteUrl,
         });
       } catch {
-        handleCopyCode();
+        handleCopyLink();
       }
     } else {
-      handleCopyCode();
+      handleCopyLink();
     }
   };
 
@@ -161,12 +174,20 @@ export const OnlineGameBar: React.FC<OnlineGameBarProps> = ({
               </div>
             </div>
           </div>
-          <button
-            onClick={handleCopyCode}
-            className="px-2.5 py-1 rounded-xl bg-amber-500 text-zinc-950 font-bold text-[10px] uppercase tracking-wider shadow-sm"
-          >
-            {isCopied ? 'Kopyalandı!' : 'Kodu Kopyala'}
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={handleCopyCode}
+              className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-[10px] uppercase tracking-wider shadow-sm transition-colors"
+            >
+              {isCopied ? 'Kopyalandı!' : 'Kodu Kopyala'}
+            </button>
+            <button
+              onClick={handleCopyLink}
+              className="px-2.5 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-bold text-[10px] uppercase tracking-wider shadow-sm border border-amber-400/30 transition-colors"
+            >
+              {isLinkCopied ? 'Bağlantı Kopyalandı!' : 'Linki Kopyala'}
+            </button>
+          </div>
         </div>
       )}
 

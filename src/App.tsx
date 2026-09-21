@@ -54,7 +54,13 @@ export default function App() {
   // Modals
   const [isRulesOpen, setIsRulesOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isOnlineLobbyOpen, setIsOnlineLobbyOpen] = useState(false);
+  const [isOnlineLobbyOpen, setIsOnlineLobbyOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return Boolean(params.get('room'));
+    }
+    return false;
+  });
 
   // Online Multiplayer Hook
   const online = useOnlineGame();

@@ -42,7 +42,13 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
   defaultVariant,
   errorMessage,
 }) => {
-  const [tab, setTab] = useState<'quick' | 'create' | 'join' | 'rooms'>('quick');
+  const [tab, setTab] = useState<'quick' | 'create' | 'join' | 'rooms'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('room')) return 'join';
+    }
+    return 'create'; // Default to 'create' tab so creating room is 1 click away!
+  });
   const [playerName, setPlayerName] = useState(() => {
     try {
       return localStorage.getItem('dama_player_name') || `Oyuncu_${Math.floor(100 + Math.random() * 900)}`;
@@ -52,7 +58,13 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
   });
   const [selectedVariant, setSelectedVariant] = useState<GameVariant>(defaultVariant);
   const [preferredColor, setPreferredColor] = useState<'red' | 'black' | 'random'>('random');
-  const [roomCodeInput, setRoomCodeInput] = useState('');
+  const [roomCodeInput, setRoomCodeInput] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return (params.get('room') || '').toUpperCase();
+    }
+    return '';
+  });
 
   // Persist player name
   const handleNameChange = (val: string) => {
@@ -361,8 +373,13 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
                   maxLength={6}
                   value={roomCodeInput}
                   onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && roomCodeInput.trim().length >= 4) {
+                      onJoinRoom(roomCodeInput, playerName);
+                    }
+                  }}
                   placeholder="Örn: TK4821"
-                  className="w-full h-13 text-center tracking-[0.3em] font-cinzel text-xl font-bold rounded-2xl bg-zinc-950 border border-amber-400/40 focus:border-amber-400 text-amber-200 outline-none"
+                  className="w-full h-13 text-center tracking-[0.3em] font-cinzel text-xl font-bold rounded-2xl bg-zinc-950 border border-amber-400/40 focus:border-amber-400 text-amber-200 outline-none uppercase"
                 />
               </div>
 
