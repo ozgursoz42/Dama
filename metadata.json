@@ -1,0 +1,6 @@
+{
+  "name": "DAMA - Checkers",
+  "description": "An elegant, premium checkers and Turkish dama game featuring real-time online multiplayer, room lobbies, single-player AI with 4 difficulty levels, 2-player mode, and authentic wooden board aesthetics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

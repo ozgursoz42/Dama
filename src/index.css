@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-serif: 'Cinzel', serif;
+    --font-sans: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+}
+
+.font-cinzel {
+  font-family: 'Cinzel', serif;
+}
+
+/* Realistic Wooden Textures using layered CSS gradients */
+.wood-board-walnut {
+  background: 
+    linear-gradient(135deg, rgba(30, 18, 12, 0.95), rgba(46, 28, 18, 0.95)),
+    repeating-linear-gradient(45deg, rgba(20, 10, 5, 0.2) 0px, rgba(20, 10, 5, 0.2) 2px, transparent 2px, transparent 6px);
+  box-shadow: 
+    0 20px 40px -10px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(197, 160, 89, 0.25),
+    inset 0 2px 4px rgba(255, 255, 255, 0.1),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.wood-board-mahogany {
+  background: 
+    linear-gradient(135deg, rgba(45, 14, 14, 0.95), rgba(70, 20, 20, 0.95)),
+    repeating-linear-gradient(45deg, rgba(25, 5, 5, 0.25) 0px, rgba(25, 5, 5, 0.25) 2px, transparent 2px, transparent 6px);
+  box-shadow: 
+    0 20px 40px -10px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(212, 175, 55, 0.25),
+    inset 0 2px 4px rgba(255, 255, 255, 0.1),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.wood-board-ebony {
+  background: 
+    linear-gradient(135deg, rgba(18, 18, 20, 0.95), rgba(30, 31, 35, 0.95)),
+    repeating-linear-gradient(45deg, rgba(10, 10, 12, 0.3) 0px, rgba(10, 10, 12, 0.3) 2px, transparent 2px, transparent 6px);
+  box-shadow: 
+    0 20px 40px -10px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(180, 180, 190, 0.25),
+    inset 0 2px 4px rgba(255, 255, 255, 0.1),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.9);
+}
+
+/* Dark Squares (Playable) */
+.square-dark-walnut {
+  background: radial-gradient(circle at 35% 35%, #422919 0%, #29180d 65%, #1d1008 100%);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5), inset 0 -1px 2px rgba(255,255,255,0.03);
+}
+
+.square-dark-mahogany {
+  background: radial-gradient(circle at 35% 35%, #4a1919 0%, #2f0e0e 65%, #1e0707 100%);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5), inset 0 -1px 2px rgba(255,255,255,0.03);
+}
+
+.square-dark-ebony {
+  background: radial-gradient(circle at 35% 35%, #24262b 0%, #151619 65%, #0c0d0f 100%);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.6), inset 0 -1px 2px rgba(255,255,255,0.04);
+}
+
+/* Light Squares */
+.square-light-walnut {
+  background: radial-gradient(circle at 40% 40%, #dfc8a8 0%, #cbaf8b 70%, #b89871 100%);
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.4), inset 0 -1px 2px rgba(0,0,0,0.15);
+}
+
+.square-light-mahogany {
+  background: radial-gradient(circle at 40% 40%, #e6cbbe 0%, #d4b1a1 70%, #be9482 100%);
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.4), inset 0 -1px 2px rgba(0,0,0,0.15);
+}
+
+.square-light-ebony {
+  background: radial-gradient(circle at 40% 40%, #c4c6cb 0%, #a7a9b0 70%, #8f929a 100%);
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.4), inset 0 -1px 2px rgba(0,0,0,0.15);
+}
+
+/* High-End Realistic Checkers Pieces */
+.piece-red {
+  background: radial-gradient(circle at 35% 30%, #ef4444 0%, #b91c1c 45%, #7f1d1d 85%, #450a0a 100%);
+  box-shadow: 
+    0 6px 12px -2px rgba(0, 0, 0, 0.65),
+    0 2px 4px rgba(0, 0, 0, 0.4),
+    inset 0 3px 4px rgba(255, 180, 180, 0.6),
+    inset 0 -3px 5px rgba(40, 5, 5, 0.8),
+    0 0 0 1.5px rgba(239, 68, 68, 0.5);
+}
+
+.piece-black {
+  background: radial-gradient(circle at 35% 30%, #3f3f46 0%, #27272a 45%, #18181b 85%, #09090b 100%);
+  box-shadow: 
+    0 6px 12px -2px rgba(0, 0, 0, 0.8),
+    0 2px 4px rgba(0, 0, 0, 0.5),
+    inset 0 3px 4px rgba(255, 255, 255, 0.4),
+    inset 0 -3px 5px rgba(0, 0, 0, 0.9),
+    0 0 0 1.5px rgba(161, 161, 170, 0.4);
+}
+
+/* Concentric tactile rings inside the checker pieces */
+.piece-groove {
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.5), 0 1px 1px rgba(255,255,255,0.2);
+}
+
+/* Subtle pulsating animation for mandatory jump indicator */
+@keyframes goldPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(234, 179, 8, 0);
+  }
+}
+
+.animate-gold-pulse {
+  animation: goldPulse 1.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
