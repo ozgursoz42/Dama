@@ -616,6 +616,7 @@ export default function App() {
         isOpen={isOnlineLobbyOpen}
         onClose={() => setIsOnlineLobbyOpen(false)}
         isConnected={online.isConnected}
+        isConnecting={online.isConnecting}
         activeRooms={online.activeRooms}
         isLoadingRooms={online.isLoadingRooms}
         onRefreshRooms={online.fetchActiveRooms}

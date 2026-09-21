@@ -27,6 +27,7 @@ interface OnlineLobbyModalProps {
   onJoinRoom: (roomId: string, playerName: string) => void;
   defaultVariant: GameVariant;
   errorMessage: string | null;
+  isConnecting?: boolean;
 }
 
 export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
@@ -41,6 +42,7 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
   onJoinRoom,
   defaultVariant,
   errorMessage,
+  isConnecting = false,
 }) => {
   const [tab, setTab] = useState<'quick' | 'create' | 'join' | 'rooms'>(() => {
     if (typeof window !== 'undefined') {
@@ -386,11 +388,20 @@ export const OnlineLobbyModal: React.FC<OnlineLobbyModalProps> = ({
               <button
                 id="btn-join-room-code"
                 onClick={() => onJoinRoom(roomCodeInput, playerName)}
-                disabled={!isConnected || roomCodeInput.trim().length < 4}
-                className="w-full h-13 rounded-2xl bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 disabled:opacity-40 text-zinc-950 font-bold text-xs tracking-widest uppercase flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-98 transition-all"
+                disabled={!isConnected || isConnecting || roomCodeInput.trim().length < 4}
+                className="w-full h-13 rounded-2xl bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 disabled:opacity-50 text-zinc-950 font-bold text-xs tracking-widest uppercase flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-98 transition-all cursor-pointer disabled:cursor-not-allowed"
               >
-                <LogIn className="w-4 h-4" />
-                <span>ODAYA GİRİŞ YAP</span>
+                {isConnecting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-zinc-950" />
+                    <span>ODAYA BAĞLANILIYOR...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    <span>ODAYA GİRİŞ YAP</span>
+                  </>
+                )}
               </button>
             </div>
           )}

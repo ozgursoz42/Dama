@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Peer, type DataConnection } from 'peerjs';
+import mqtt, { type MqttClient } from 'mqtt';
 import {
   GameVariant,
   Move,
@@ -20,10 +20,36 @@ function generateRoomCode(): string {
   return result;
 }
 
-const PEER_PREFIX = 'dama-v2-';
+// Public WebSocket MQTT Brokers with WSS (SSL) support
+const MQTT_BROKERS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+];
+
+interface NetworkMessage {
+  senderId: string;
+  senderName: string;
+  type:
+    | 'ROOM_ANNOUNCE'
+    | 'ROOM_CLOSED'
+    | 'JOIN_REQUEST'
+    | 'JOIN_ACCEPTED'
+    | 'SYNC_MOVE'
+    | 'CHAT'
+    | 'RESIGN'
+    | 'DRAW_OFFER'
+    | 'DRAW_RESPONSE'
+    | 'REMATCH_REQUEST'
+    | 'HEARTBEAT'
+    | 'PLAYER_LEFT';
+  targetId?: string;
+  payload?: any;
+  timestamp: number;
+}
 
 export function useOnlineGame() {
   const [isConnected, setIsConnected] = useState(true);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [roomState, setRoomState] = useState<OnlineRoomState | null>(null);
   const [myColor, setMyColor] = useState<PieceColor | 'spectator' | null>(null);
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
@@ -33,10 +59,29 @@ export function useOnlineGame() {
   const [activeRooms, setActiveRooms] = useState<OnlineRoomSummary[]>([]);
   const [isLoadingRooms, setIsLoadingRooms] = useState(false);
 
-  const peerRef = useRef<Peer | null>(null);
-  const connRef = useRef<DataConnection | null>(null);
-  const notificationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const clientRef = useRef<MqttClient | null>(null);
+  const currentTopicRef = useRef<string | null>(null);
   const isHostRef = useRef<boolean>(false);
+  const roomStateRef = useRef<OnlineRoomState | null>(null);
+  const myPlayerIdRef = useRef<string | null>(null);
+  const myPlayerNameRef = useRef<string>('Oyuncu');
+
+  const notificationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const joinRetryTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const joinTimeoutTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Synchronize state and ref together to avoid stale closures
+  const updateRoomState = useCallback(
+    (updater: OnlineRoomState | null | ((prev: OnlineRoomState | null) => OnlineRoomState | null)) => {
+      setRoomState((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater;
+        roomStateRef.current = next;
+        return next;
+      });
+    },
+    []
+  );
 
   const showNotification = useCallback((msg: string) => {
     setNotification(msg);
@@ -46,24 +91,77 @@ export function useOnlineGame() {
     }, 4500);
   }, []);
 
-  // Cleanup helper
+  // Publish message to current room topic
+  const publishMessage = useCallback(
+    (msg: NetworkMessage, options?: { retain?: boolean }) => {
+      if (clientRef.current && clientRef.current.connected && currentTopicRef.current) {
+        try {
+          clientRef.current.publish(
+            currentTopicRef.current,
+            JSON.stringify(msg),
+            { qos: 1, retain: options?.retain || false }
+          );
+        } catch (err) {
+          console.error('MQTT publish error:', err);
+        }
+      }
+    },
+    []
+  );
+
+  // Cleanup all timers and MQTT connection
   const cleanupConnections = useCallback(() => {
-    if (connRef.current) {
-      try {
-        connRef.current.close();
-      } catch {
-        // Ignored
-      }
-      connRef.current = null;
+    if (joinRetryTimerRef.current) {
+      clearInterval(joinRetryTimerRef.current);
+      joinRetryTimerRef.current = null;
     }
-    if (peerRef.current) {
-      try {
-        peerRef.current.destroy();
-      } catch {
-        // Ignored
-      }
-      peerRef.current = null;
+    if (joinTimeoutTimerRef.current) {
+      clearTimeout(joinTimeoutTimerRef.current);
+      joinTimeoutTimerRef.current = null;
     }
+    if (heartbeatTimerRef.current) {
+      clearInterval(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = null;
+    }
+
+    setIsConnecting(false);
+
+    if (clientRef.current) {
+      try {
+        if (currentTopicRef.current && myPlayerIdRef.current) {
+          if (isHostRef.current) {
+            // Clear retained room announcement if host is leaving
+            clientRef.current.publish(
+              currentTopicRef.current,
+              JSON.stringify({
+                senderId: myPlayerIdRef.current,
+                senderName: myPlayerNameRef.current,
+                type: 'ROOM_CLOSED',
+                timestamp: Date.now(),
+              }),
+              { qos: 1, retain: true }
+            );
+          } else {
+            const leaveMsg: NetworkMessage = {
+              senderId: myPlayerIdRef.current,
+              senderName: myPlayerNameRef.current,
+              type: 'PLAYER_LEFT',
+              timestamp: Date.now(),
+            };
+            clientRef.current.publish(
+              currentTopicRef.current,
+              JSON.stringify(leaveMsg),
+              { qos: 0 }
+            );
+          }
+        }
+        clientRef.current.end(true);
+      } catch {
+        // Ignore
+      }
+      clientRef.current = null;
+    }
+    currentTopicRef.current = null;
   }, []);
 
   // Cleanup on unmount
@@ -73,90 +171,128 @@ export function useOnlineGame() {
     };
   }, [cleanupConnections]);
 
-  // Send message to peer
-  const sendToPeer = useCallback((payload: Record<string, unknown>) => {
-    if (connRef.current && connRef.current.open) {
-      try {
-        connRef.current.send(payload);
-      } catch (err) {
-        console.error('Peer send error:', err);
-      }
-    }
-  }, []);
+  // Handle incoming parsed network message
+  const handleIncomingMessage = useCallback(
+    (msg: NetworkMessage) => {
+      if (!msg || typeof msg !== 'object') return;
+      // Discard our own messages
+      if (msg.senderId === myPlayerIdRef.current) return;
 
-  // Handle incoming peer data
-  const handlePeerData = useCallback(
-    (data: any) => {
-      if (!data || typeof data !== 'object') return;
+      switch (msg.type) {
+        case 'ROOM_ANNOUNCE': {
+          // If guest is waiting to join and room is announced, send join request immediately
+          if (!isHostRef.current && myPlayerIdRef.current && !roomStateRef.current) {
+            publishMessage({
+              senderId: myPlayerIdRef.current,
+              senderName: myPlayerNameRef.current,
+              type: 'JOIN_REQUEST',
+              timestamp: Date.now(),
+            });
+          }
+          break;
+        }
 
-      switch (data.type) {
+        case 'ROOM_CLOSED': {
+          if (!isHostRef.current) {
+            showNotification('Oda sahibi oyundan ayrıldı.');
+            setError('Ev sahibi odayı kapattı.');
+          }
+          break;
+        }
+
         case 'JOIN_REQUEST': {
           // Host receives join request from guest
           if (!isHostRef.current) return;
-          setRoomState((prev) => {
-            if (!prev) return prev;
+          const current = roomStateRef.current;
+          if (!current) return;
 
-            const hostColor = prev.players.red?.id === myPlayerId ? 'red' : 'black';
-            const guestColor: PieceColor = hostColor === 'red' ? 'black' : 'red';
+          const hostColor = current.players.red?.id === myPlayerIdRef.current ? 'red' : 'black';
+          const guestColor: PieceColor = hostColor === 'red' ? 'black' : 'red';
 
-            const updatedState: OnlineRoomState = {
-              ...prev,
-              players: {
-                ...prev.players,
-                [guestColor]: {
-                  id: data.playerId,
-                  name: data.playerName,
-                  color: guestColor,
-                  connected: true,
-                },
+          const updatedState: OnlineRoomState = {
+            ...current,
+            players: {
+              ...current.players,
+              [guestColor]: {
+                id: msg.senderId,
+                name: msg.senderName,
+                color: guestColor,
+                connected: true,
               },
-              lastActivity: Date.now(),
-            };
+            },
+            lastActivity: Date.now(),
+          };
 
-            // Send acceptance with full state to guest
-            sendToPeer({
-              type: 'JOIN_ACCEPTED',
+          updateRoomState(updatedState);
+
+          // Send acceptance specifically targeted to this guest
+          publishMessage({
+            senderId: myPlayerIdRef.current!,
+            senderName: myPlayerNameRef.current,
+            type: 'JOIN_ACCEPTED',
+            targetId: msg.senderId,
+            payload: {
               roomState: updatedState,
               assignedColor: guestColor,
-              assignedId: data.playerId,
-            });
-
-            showNotification(`${data.playerName} odaya katıldı! Oyun başlıyor.`);
-            return updatedState;
+            },
+            timestamp: Date.now(),
           });
+
+          showNotification(`${msg.senderName} odaya katıldı! Oyun başlıyor.`);
           break;
         }
 
         case 'JOIN_ACCEPTED': {
           // Guest receives full room state from host
-          setRoomState(data.roomState);
-          setMyColor(data.assignedColor);
-          setMyPlayerId(data.assignedId);
+          if (isHostRef.current) return;
+          if (msg.targetId && msg.targetId !== myPlayerIdRef.current) return;
+
+          if (joinRetryTimerRef.current) {
+            clearInterval(joinRetryTimerRef.current);
+            joinRetryTimerRef.current = null;
+          }
+          if (joinTimeoutTimerRef.current) {
+            clearTimeout(joinTimeoutTimerRef.current);
+            joinTimeoutTimerRef.current = null;
+          }
+
+          setIsConnecting(false);
           setError(null);
-          showNotification('Odaya başarıyla bağlanıldı! İyi oyunlar.');
+
+          const { roomState: hostRoomState, assignedColor } = msg.payload || {};
+          if (hostRoomState && assignedColor) {
+            updateRoomState(hostRoomState);
+            setMyColor(assignedColor);
+            showNotification('Odaya başarıyla bağlanıldı! İyi oyunlar.');
+          }
           break;
         }
 
         case 'SYNC_MOVE': {
-          setRoomState(data.roomState);
+          if (msg.payload?.roomState) {
+            updateRoomState(msg.payload.roomState);
+          }
           break;
         }
 
         case 'CHAT': {
-          setRoomState((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              chatMessages: [...prev.chatMessages, data.message],
-            };
-          });
+          if (msg.payload?.chatMessage) {
+            updateRoomState((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                chatMessages: [...prev.chatMessages, msg.payload.chatMessage],
+              };
+            });
+          }
           break;
         }
 
         case 'RESIGN': {
-          setRoomState((prev) => {
+          updateRoomState((prev) => {
             if (!prev) return prev;
-            const winnerColor: PieceColor = data.resignedBy === 'red' ? 'black' : 'red';
+            const resignedColor: PieceColor = msg.payload?.resignedBy;
+            const winnerColor: PieceColor = resignedColor === 'red' ? 'black' : 'red';
             const winningStatus = winnerColor === 'red' ? 'red_won' : 'black_won';
             showNotification(`Rakip maçı terk etti. Kazandınız!`);
             return {
@@ -169,20 +305,20 @@ export function useOnlineGame() {
         }
 
         case 'DRAW_OFFER': {
-          setRoomState((prev) => {
+          updateRoomState((prev) => {
             if (!prev) return prev;
             showNotification('Rakibiniz beraberlik teklif etti.');
             return {
               ...prev,
-              drawOfferedBy: data.from,
+              drawOfferedBy: msg.payload?.from,
             };
           });
           break;
         }
 
         case 'DRAW_RESPONSE': {
-          if (data.accepted) {
-            setRoomState((prev) => {
+          if (msg.payload?.accepted) {
+            updateRoomState((prev) => {
               if (!prev) return prev;
               showNotification('Beraberlik teklifi kabul edildi. Oyun berabere!');
               return {
@@ -193,7 +329,7 @@ export function useOnlineGame() {
               };
             });
           } else {
-            setRoomState((prev) => {
+            updateRoomState((prev) => {
               if (!prev) return prev;
               showNotification('Beraberlik teklifi reddedildi.');
               return {
@@ -206,10 +342,10 @@ export function useOnlineGame() {
         }
 
         case 'REMATCH_REQUEST': {
-          setRoomState((prev) => {
+          updateRoomState((prev) => {
             if (!prev) return prev;
-            if (prev.rematchRequestedBy && prev.rematchRequestedBy !== data.requestedBy) {
-              // Both sides accepted rematch! Start fresh game with swapped colors
+            if (prev.rematchRequestedBy && prev.rematchRequestedBy !== msg.payload?.requestedBy) {
+              // Both sides agreed: reset game with swapped colors or fresh board
               const newBoard = createInitialBoard(prev.variant);
               const updatedState: OnlineRoomState = {
                 ...prev,
@@ -230,10 +366,30 @@ export function useOnlineGame() {
               showNotification('Rakip rövanş maçı teklif etti!');
               return {
                 ...prev,
-                rematchRequestedBy: data.requestedBy,
+                rematchRequestedBy: msg.payload?.requestedBy,
               };
             }
           });
+          break;
+        }
+
+        case 'PLAYER_LEFT': {
+          showNotification('Rakip odadan ayrıldı.');
+          updateRoomState((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              players: {
+                red: prev.players.red ? { ...prev.players.red, connected: prev.players.red.id === myPlayerIdRef.current } : null,
+                black: prev.players.black ? { ...prev.players.black, connected: prev.players.black.id === myPlayerIdRef.current } : null,
+              },
+            };
+          });
+          break;
+        }
+
+        case 'HEARTBEAT': {
+          // Keep-alive received
           break;
         }
 
@@ -241,40 +397,106 @@ export function useOnlineGame() {
           break;
       }
     },
-    [myPlayerId, sendToPeer, showNotification]
+    [publishMessage, showNotification, updateRoomState]
   );
 
-  // Set up connection event listeners
-  const setupConnectionListeners = useCallback(
-    (conn: DataConnection) => {
-      connRef.current = conn;
+  // Connect to MQTT Broker with fallback
+  const connectBroker = useCallback(
+    (
+      topic: string,
+      onConnected: () => void,
+      onError: (err: string) => void,
+      brokerIndex = 0
+    ) => {
+      if (brokerIndex >= MQTT_BROKERS.length) {
+        onError('Çevrimiçi sunuculara bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.');
+        setIsConnecting(false);
+        return;
+      }
 
-      conn.on('data', (data: any) => {
-        handlePeerData(data);
+      const brokerUrl = MQTT_BROKERS[brokerIndex];
+      const clientId = `dama_${Math.random().toString(36).substring(2, 11)}`;
+
+      const client = mqtt.connect(brokerUrl, {
+        clientId,
+        clean: true,
+        connectTimeout: 8000,
+        reconnectPeriod: 3000,
+        keepalive: 20,
       });
 
-      conn.on('close', () => {
-        showNotification('Rakibin bağlantısı kesildi.');
-        setRoomState((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            players: {
-              red: prev.players.red ? { ...prev.players.red, connected: prev.players.red.id === myPlayerId } : null,
-              black: prev.players.black ? { ...prev.players.black, connected: prev.players.black.id === myPlayerId } : null,
-            },
-          };
+      let hasConnected = false;
+
+      client.on('connect', () => {
+        hasConnected = true;
+        setIsConnected(true);
+        currentTopicRef.current = topic;
+
+        client.subscribe(topic, { qos: 1 }, (subErr) => {
+          if (subErr) {
+            console.error('MQTT subscribe error:', subErr);
+            onError('Odaya abone olunamadı.');
+            setIsConnecting(false);
+            return;
+          }
+          onConnected();
         });
       });
 
-      conn.on('error', (err) => {
-        console.error('DataConnection error:', err);
+      client.on('message', (_top, payload) => {
+        try {
+          const parsed = JSON.parse(payload.toString());
+          handleIncomingMessage(parsed);
+        } catch (e) {
+          console.error('Failed to parse incoming message:', e);
+        }
       });
+
+      client.on('error', (err) => {
+        console.error('MQTT error on', brokerUrl, err);
+        if (!hasConnected) {
+          client.end(true);
+          // Try next broker fallback
+          connectBroker(topic, onConnected, onError, brokerIndex + 1);
+        }
+      });
+
+      client.on('close', () => {
+        if (!hasConnected) {
+          client.end(true);
+          connectBroker(topic, onConnected, onError, brokerIndex + 1);
+        }
+      });
+
+      clientRef.current = client;
     },
-    [handlePeerData, myPlayerId, showNotification]
+    [handleIncomingMessage]
   );
 
-  // Initialize Host Peer
+  // Start periodic heartbeat
+  const startHeartbeat = useCallback(
+    (pId: string, pName: string) => {
+      if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = setInterval(() => {
+        if (clientRef.current && clientRef.current.connected && currentTopicRef.current) {
+          const hb: NetworkMessage = {
+            senderId: pId,
+            senderName: pName,
+            type: 'HEARTBEAT',
+            timestamp: Date.now(),
+          };
+          try {
+            clientRef.current.publish(currentTopicRef.current, JSON.stringify(hb), { qos: 0 });
+          } catch {
+            // Ignore
+          }
+        }
+      }, 10000);
+    },
+    []
+  );
+
+  // Host creates room
   const createRoom = useCallback(
     (
       variant: GameVariant,
@@ -285,6 +507,7 @@ export function useOnlineGame() {
       setError(null);
       isHostRef.current = true;
       setMyPlayerName(playerName);
+      myPlayerNameRef.current = playerName;
 
       const roomId = generateRoomCode();
       const hostColor: PieceColor =
@@ -297,8 +520,8 @@ export function useOnlineGame() {
       const hostId = 'p_' + Math.random().toString(36).substring(2, 9);
       setMyColor(hostColor);
       setMyPlayerId(hostId);
+      myPlayerIdRef.current = hostId;
 
-      // Create initial authoritative state immediately
       const initialRoom: OnlineRoomState = {
         roomId,
         variant,
@@ -325,155 +548,142 @@ export function useOnlineGame() {
         lastActivity: Date.now(),
       };
 
-      setRoomState(initialRoom);
+      updateRoomState(initialRoom);
 
-      // Initialize PeerJS host with deterministic ID
-      const peerId = `${PEER_PREFIX}${roomId.toLowerCase()}`;
-      try {
-        const peer = new Peer(peerId, {
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' },
-            ],
-          },
-        });
-
-        peer.on('open', () => {
-          setIsConnected(true);
-          setError(null);
-        });
-
-        peer.on('connection', (conn) => {
-          setupConnectionListeners(conn);
-        });
-
-        peer.on('error', (err: any) => {
-          console.error('Host peer error:', err);
-          if (err.type === 'unavailable-id') {
-            // Very rare collision: retry with a new code
-            createRoom(variant, playerName, preferredColor);
-          } else {
-            setError('Bağlantı hatası: ' + (err.message || 'Lütfen tekrar deneyin.'));
-          }
-        });
-
-        peerRef.current = peer;
-      } catch (err: any) {
-        console.error('Failed to create host peer:', err);
-        setError('P2P ağına bağlanılamadı.');
-      }
+      const topic = `turkdama/rooms/${roomId.toLowerCase()}`;
+      connectBroker(
+        topic,
+        () => {
+          // Announce room retained so any guest subscribing instantly gets room details
+          publishMessage(
+            {
+              senderId: hostId,
+              senderName: playerName,
+              type: 'ROOM_ANNOUNCE',
+              payload: {
+                roomId,
+                variant,
+                hostName: playerName,
+                hostColor,
+              },
+              timestamp: Date.now(),
+            },
+            { retain: true }
+          );
+          startHeartbeat(hostId, playerName);
+        },
+        (errMsg) => {
+          setError(errMsg);
+        }
+      );
     },
-    [cleanupConnections, setupConnectionListeners]
+    [cleanupConnections, connectBroker, publishMessage, startHeartbeat, updateRoomState]
   );
 
-  // Initialize Guest Peer & Join
+  // Guest joins room
   const joinRoom = useCallback(
     (roomIdInput: string, playerName: string) => {
       cleanupConnections();
       setError(null);
+      setIsConnecting(true);
       isHostRef.current = false;
       setMyPlayerName(playerName);
+      myPlayerNameRef.current = playerName;
 
       const cleanCode = roomIdInput.trim().toUpperCase();
       if (cleanCode.length < 4) {
-        setError('Geçersiz oda kodu girdiniz.');
+        setError('Geçersiz oda kodu. En az 4-6 karakter giriniz.');
+        setIsConnecting(false);
         return;
       }
 
       const guestId = 'p_' + Math.random().toString(36).substring(2, 9);
       setMyPlayerId(guestId);
+      myPlayerIdRef.current = guestId;
 
-      try {
-        // Random guest peer ID
-        const peer = new Peer({
-          config: {
-            iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
-              { urls: 'stun:global.stun.twilio.com:3478' },
-            ],
-          },
-        });
-
-        peer.on('open', () => {
-          setIsConnected(true);
-          setError(null);
-
-          const targetHostId = `${PEER_PREFIX}${cleanCode.toLowerCase()}`;
-          const conn = peer.connect(targetHostId, {
-            reliable: true,
-          });
-
-          setupConnectionListeners(conn);
-
-          conn.on('open', () => {
-            conn.send({
+      const topic = `turkdama/rooms/${cleanCode.toLowerCase()}`;
+      connectBroker(
+        topic,
+        () => {
+          // Connection ready: start requesting join from host
+          const sendJoinReq = () => {
+            const reqMsg: NetworkMessage = {
+              senderId: guestId,
+              senderName: playerName,
               type: 'JOIN_REQUEST',
-              playerName,
-              playerId: guestId,
-            });
-          });
-        });
+              timestamp: Date.now(),
+            };
+            publishMessage(reqMsg);
+          };
 
-        peer.on('error', (err: any) => {
-          console.error('Guest peer error:', err);
-          if (err.type === 'peer-unavailable') {
-            setError('Oda bulunamadı veya kapatılmış. Oda kodunu kontrol edin.');
-          } else {
-            setError('Bağlantı kurulamadı: ' + (err.message || 'Hata oluştu'));
-          }
-        });
+          // Send immediately
+          sendJoinReq();
 
-        peerRef.current = peer;
-      } catch (err: any) {
-        console.error('Failed to connect to room:', err);
-        setError('Odaya bağlanılamadı.');
-      }
+          // Retry sending every 1.5s until accepted or timeout
+          joinRetryTimerRef.current = setInterval(sendJoinReq, 1500);
+
+          // 12-second timeout if room not found
+          joinTimeoutTimerRef.current = setTimeout(() => {
+            if (joinRetryTimerRef.current) {
+              clearInterval(joinRetryTimerRef.current);
+              joinRetryTimerRef.current = null;
+            }
+            setIsConnecting(false);
+            setError('Oda bulunamadı veya ev sahibi henüz oyuna girmedi. Lütfen oda kodunu kontrol edin.');
+          }, 12000);
+
+          startHeartbeat(guestId, playerName);
+        },
+        (errMsg) => {
+          setIsConnecting(false);
+          setError(errMsg);
+        }
+      );
     },
-    [cleanupConnections, setupConnectionListeners]
+    [cleanupConnections, connectBroker, publishMessage, startHeartbeat]
   );
 
-  // Quick Match: Tries joining an active pool or hosts one
+  // Quick Match
   const quickMatch = useCallback(
     (variant: GameVariant, playerName: string) => {
       const qmCode = `QM${variant.substring(0, 3).toUpperCase()}1`;
       joinRoom(qmCode, playerName);
 
-      // If peer is unavailable within 2.5 seconds, create as host on that code!
       const timer = setTimeout(() => {
-        if (!roomState) {
+        if (!roomStateRef.current) {
           createRoom(variant, playerName, 'random');
         }
-      }, 2500);
+      }, 3000);
 
       return () => clearTimeout(timer);
     },
-    [createRoom, joinRoom, roomState]
+    [createRoom, joinRoom]
   );
 
   // Make Move Handler
   const makeMove = useCallback(
     (move: Move) => {
-      if (!roomState) return;
+      const current = roomStateRef.current;
+      if (!current) return;
 
       const { newBoard, hasFurtherJumps } = applyMove(
-        roomState.board,
+        current.board,
         move,
-        roomState.variant
+        current.variant
       );
 
       const nextTurn: PieceColor = hasFurtherJumps
-        ? roomState.currentTurn
-        : roomState.currentTurn === 'red'
+        ? current.currentTurn
+        : current.currentTurn === 'red'
         ? 'black'
         : 'red';
 
       const nextStatus = hasFurtherJumps
         ? 'playing'
-        : checkGameStatus(newBoard, nextTurn, null, roomState.variant);
+        : checkGameStatus(newBoard, nextTurn, null, current.variant);
 
       const updatedState: OnlineRoomState = {
-        ...roomState,
+        ...current,
         board: newBoard,
         currentTurn: nextTurn,
         multiJumpPiecePos: hasFurtherJumps ? move.to : null,
@@ -487,48 +697,62 @@ export function useOnlineGame() {
             ? 'draw'
             : undefined,
         lastMove: { from: move.from, to: move.to },
-        moveCount: roomState.moveCount + 1,
+        moveCount: current.moveCount + 1,
         lastActivity: Date.now(),
       };
 
-      setRoomState(updatedState);
+      updateRoomState(updatedState);
 
-      sendToPeer({
-        type: 'SYNC_MOVE',
-        move,
-        roomState: updatedState,
-      });
+      if (myPlayerIdRef.current) {
+        publishMessage({
+          senderId: myPlayerIdRef.current,
+          senderName: myPlayerNameRef.current,
+          type: 'SYNC_MOVE',
+          payload: {
+            move,
+            roomState: updatedState,
+          },
+          timestamp: Date.now(),
+        });
+      }
     },
-    [roomState, sendToPeer]
+    [publishMessage, updateRoomState]
   );
 
   // Resign
   const resign = useCallback(() => {
-    if (!roomState || !myColor || myColor === 'spectator') return;
+    const current = roomStateRef.current;
+    if (!current || !myColor || myColor === 'spectator' || !myPlayerIdRef.current) return;
 
     const winnerColor: PieceColor = myColor === 'red' ? 'black' : 'red';
     const winningStatus = winnerColor === 'red' ? 'red_won' : 'black_won';
 
     const updatedState: OnlineRoomState = {
-      ...roomState,
+      ...current,
       status: winningStatus,
       winner: winnerColor,
       lastActivity: Date.now(),
     };
 
-    setRoomState(updatedState);
+    updateRoomState(updatedState);
 
-    sendToPeer({
+    publishMessage({
+      senderId: myPlayerIdRef.current,
+      senderName: myPlayerNameRef.current,
       type: 'RESIGN',
-      resignedBy: myColor,
+      payload: {
+        resignedBy: myColor,
+      },
+      timestamp: Date.now(),
     });
-  }, [myColor, roomState, sendToPeer]);
+  }, [myColor, publishMessage, updateRoomState]);
 
   // Offer Draw
   const offerDraw = useCallback(() => {
-    if (!roomState || !myColor || myColor === 'spectator') return;
+    const current = roomStateRef.current;
+    if (!current || !myColor || myColor === 'spectator' || !myPlayerIdRef.current) return;
 
-    setRoomState((prev) => {
+    updateRoomState((prev) => {
       if (!prev) return prev;
       return {
         ...prev,
@@ -536,31 +760,37 @@ export function useOnlineGame() {
       };
     });
 
-    sendToPeer({
+    publishMessage({
+      senderId: myPlayerIdRef.current,
+      senderName: myPlayerNameRef.current,
       type: 'DRAW_OFFER',
-      from: myColor,
+      payload: {
+        from: myColor,
+      },
+      timestamp: Date.now(),
     });
 
     showNotification('Beraberlik teklifi gönderildi.');
-  }, [myColor, roomState, sendToPeer, showNotification]);
+  }, [myColor, publishMessage, showNotification, updateRoomState]);
 
   // Respond to Draw
   const respondDraw = useCallback(
     (accepted: boolean) => {
-      if (!roomState) return;
+      const current = roomStateRef.current;
+      if (!current || !myPlayerIdRef.current) return;
 
       if (accepted) {
         const updatedState: OnlineRoomState = {
-          ...roomState,
+          ...current,
           status: 'draw',
           winner: 'draw',
           drawOfferedBy: null,
           lastActivity: Date.now(),
         };
-        setRoomState(updatedState);
+        updateRoomState(updatedState);
         showNotification('Beraberlik teklifini kabul ettiniz. Oyun berabere.');
       } else {
-        setRoomState((prev) => {
+        updateRoomState((prev) => {
           if (!prev) return prev;
           return {
             ...prev,
@@ -570,19 +800,25 @@ export function useOnlineGame() {
         showNotification('Beraberlik teklifini reddettiniz.');
       }
 
-      sendToPeer({
+      publishMessage({
+        senderId: myPlayerIdRef.current,
+        senderName: myPlayerNameRef.current,
         type: 'DRAW_RESPONSE',
-        accepted,
+        payload: {
+          accepted,
+        },
+        timestamp: Date.now(),
       });
     },
-    [roomState, sendToPeer, showNotification]
+    [publishMessage, showNotification, updateRoomState]
   );
 
   // Request Rematch
   const requestRematch = useCallback(() => {
-    if (!roomState || !myColor || myColor === 'spectator') return;
+    const current = roomStateRef.current;
+    if (!current || !myColor || myColor === 'spectator' || !myPlayerIdRef.current) return;
 
-    setRoomState((prev) => {
+    updateRoomState((prev) => {
       if (!prev) return prev;
       if (prev.rematchRequestedBy && prev.rematchRequestedBy !== myColor) {
         // Both accepted!
@@ -601,17 +837,27 @@ export function useOnlineGame() {
           lastActivity: Date.now(),
         };
 
-        sendToPeer({
+        publishMessage({
+          senderId: myPlayerIdRef.current!,
+          senderName: myPlayerNameRef.current,
           type: 'REMATCH_REQUEST',
-          requestedBy: myColor,
+          payload: {
+            requestedBy: myColor,
+          },
+          timestamp: Date.now(),
         });
 
         showNotification('Rövanş maçı başladı! İyi oyunlar.');
         return updatedState;
       } else {
-        sendToPeer({
+        publishMessage({
+          senderId: myPlayerIdRef.current!,
+          senderName: myPlayerNameRef.current,
           type: 'REMATCH_REQUEST',
-          requestedBy: myColor,
+          payload: {
+            requestedBy: myColor,
+          },
+          timestamp: Date.now(),
         });
         showNotification('Rövanş isteği rakibe iletildi.');
         return {
@@ -620,22 +866,22 @@ export function useOnlineGame() {
         };
       }
     });
-  }, [myColor, roomState, sendToPeer, showNotification]);
+  }, [myColor, publishMessage, showNotification, updateRoomState]);
 
   // Send Chat
   const sendChat = useCallback(
     (text: string) => {
-      if (!roomState || !text.trim()) return;
+      if (!roomStateRef.current || !text.trim() || !myPlayerIdRef.current) return;
 
       const chatMsg: ChatMessage = {
         id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-        sender: myPlayerName,
+        sender: myPlayerNameRef.current,
         senderColor: myColor === 'spectator' ? undefined : myColor || undefined,
         text: text.trim(),
         timestamp: Date.now(),
       };
 
-      setRoomState((prev) => {
+      updateRoomState((prev) => {
         if (!prev) return prev;
         return {
           ...prev,
@@ -643,22 +889,29 @@ export function useOnlineGame() {
         };
       });
 
-      sendToPeer({
+      publishMessage({
+        senderId: myPlayerIdRef.current,
+        senderName: myPlayerNameRef.current,
         type: 'CHAT',
-        message: chatMsg,
+        payload: {
+          chatMessage: chatMsg,
+        },
+        timestamp: Date.now(),
       });
     },
-    [myColor, myPlayerName, roomState, sendToPeer]
+    [myColor, publishMessage, updateRoomState]
   );
 
   // Leave Room
   const leaveRoom = useCallback(() => {
     cleanupConnections();
-    setRoomState(null);
+    updateRoomState(null);
     setMyColor(null);
     setMyPlayerId(null);
+    myPlayerIdRef.current = null;
     setError(null);
-  }, [cleanupConnections]);
+    setIsConnecting(false);
+  }, [cleanupConnections, updateRoomState]);
 
   // Refresh active rooms mock/listing
   const fetchActiveRooms = useCallback(async () => {
@@ -686,6 +939,7 @@ export function useOnlineGame() {
 
   return {
     isConnected,
+    isConnecting,
     roomState,
     myColor,
     myPlayerId,
