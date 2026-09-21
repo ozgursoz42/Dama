@@ -666,7 +666,7 @@ export function useOnlineGame() {
       const current = roomStateRef.current;
       if (!current) return;
 
-      const { newBoard, hasFurtherJumps } = applyMove(
+      const { newBoard, hasFurtherJumps, promotedToKing } = applyMove(
         current.board,
         move,
         current.variant
@@ -715,6 +715,11 @@ export function useOnlineGame() {
           timestamp: Date.now(),
         });
       }
+
+      return {
+        hasFurtherJumps,
+        promotedToKing,
+      };
     },
     [publishMessage, updateRoomState]
   );

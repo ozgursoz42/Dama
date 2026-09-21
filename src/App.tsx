@@ -312,6 +312,29 @@ export default function App() {
     }
   };
 
+  // Auto-keep jumping piece selected during chained multi-jumps (both online & local)
+  useEffect(() => {
+    if (activeMultiJump) {
+      const isMyTurn = isOnline
+        ? isMyOnlineTurn
+        : gameMode === 'ai'
+        ? !isAiTurn
+        : true;
+      if (isMyTurn) {
+        setSelectedPos(activeMultiJump);
+      }
+    } else {
+      setSelectedPos((prev) => {
+        if (!prev) return null;
+        const currentPiece = activeBoard[prev.row]?.[prev.col];
+        if (!currentPiece || currentPiece.color !== activeTurn) {
+          return null;
+        }
+        return prev;
+      });
+    }
+  }, [activeMultiJump, activeTurn, isOnline, isMyOnlineTurn, gameMode, isAiTurn, activeBoard]);
+
   // Execute Move
   const executePlayerMove = useCallback(
     (move: Move) => {
@@ -380,12 +403,21 @@ export default function App() {
 
       if (destinationMove) {
         if (isOnline) {
-          online.makeMove(destinationMove);
-          setSelectedPos(null);
-          if (destinationMove.captured) {
+          const moveRes = online.makeMove(destinationMove);
+          if (moveRes?.hasFurtherJumps) {
+            setSelectedPos(destinationMove.to);
+          } else {
+            setSelectedPos(null);
+          }
+          if (moveRes?.promotedToKing) {
+            sound.playKingPromotion();
+            triggerHaptic([30, 40, 60]);
+          } else if (destinationMove.captured) {
             sound.playWoodCapture();
+            triggerHaptic(40);
           } else {
             sound.playWoodMove();
+            triggerHaptic(15);
           }
           return;
         }
@@ -395,8 +427,13 @@ export default function App() {
       }
     }
 
-    // If active in multi-jump sequence, the player cannot select other pieces!
+    // If active in multi-jump sequence, the player can only select/reselect the jumping piece
     if (activeMultiJump) {
+      if (row === activeMultiJump.row && col === activeMultiJump.col) {
+        setSelectedPos(activeMultiJump);
+        sound.playSelect();
+        triggerHaptic(15);
+      }
       return;
     }
 
